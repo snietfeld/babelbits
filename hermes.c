@@ -71,18 +71,18 @@ void processChar(unsigned char c)
 	{
 	  if (count >= packetLen)
 	    {
-	      printf("Finished reading message.\n");
+	      //printf("Finished reading message.\n");
 	      //Validate message
 	      rxdChecksum = (G_msg[packetLen-2] << 8) | G_msg[packetLen-1];
 	      calcdChecksum = checksum16(&(G_msg[1]), packetLen-CHECKLEN-1);
 
-	      printf("Received checksum: 0x%x \t Calc'd Checksum: 0x%x\n",
-	      	     rxdChecksum, calcdChecksum);
-	      if( calcdChecksum == rxdChecksum)
-	      	printf("Message validated.\n");
+	      //printf("Received checksum: 0x%x \t Calc'd Checksum: 0x%x\n",
+	      //rxdChecksum, calcdChecksum);
+	  //if( calcdChecksum == rxdChecksum)
+	      	//printf("Message validated.\n");
 
 	      //Pass message to user
-	      processMessage(&G_msg[HEADERLEN], packetLen-HEADERLEN-CHECKLEN);
+	      p_processMsg(&G_msg[HEADERLEN], packetLen-HEADERLEN-CHECKLEN);
 	      
 	      //Done with this message, reset variables for next one
 	      synced = 0;
@@ -96,10 +96,10 @@ void processChar(unsigned char c)
 
       else if (count == HEADERLEN)  //Header hasn't been read yet
 	{
-	  printf("Processing header...\n");
+	  //printf("Processing header...\n");
 	  msgType = G_msg[1];   //Parse message type
 	  packetLen  = (G_msg[2] << 8) + G_msg[3];   //Parse message length
-	  printf("msgType: %d \t packetLen: %d\n", msgType, packetLen);
+	  //printf("msgType: %d \t packetLen: %d\n", msgType, packetLen);
 
 	  headerReceived = 1;
 	}
@@ -107,22 +107,13 @@ void processChar(unsigned char c)
 
   else if (c == SYNCBYTE)   //Check for syncbyte to start message
     {
-      printf("Synced.\n");
+      //printf("Synced.\n");
       synced = 1;
       G_msg[count] = c;
       ++count;
     }
 }
 
-void processMessage(char* p_msg, unsigned int msgLen)
-{
-  int i;
-
-  printf("Message received: \"");
-  for (i = 0; i < msgLen; ++i)
-    printf("%c", p_msg[i]);
-  printf("\"\n");
-}
 
 
 int makePacket(unsigned char msgType, unsigned char* p_data, 
@@ -155,10 +146,24 @@ int makePacket(unsigned char msgType, unsigned char* p_data,
 
 
 #ifdef UNIT_TEST
+int msgReadSuccess  = 0;
+int msgWriteSuccess = 0;
 
-void main()
+void processMessage(char* p_msg, unsigned int msgLen)
 {
-  unsigned char c;
+  int i;
+
+  printf("Message received: \"");
+  for (i = 0; i < msgLen; ++i)
+    printf("%c", p_msg[i]);
+  printf("\"\n");
+
+  if( msgLen == 2 && p_msg[0] == 'o' && p_msg[1] == 'k') msgReadSuccess = 1;
+  else if( msgLen == 2 && p_msg[0] == 'k' && p_msg[1] == 'o' ) msgWriteSuccess = 1;
+}
+
+int hermes_unit(void)
+{
   unsigned char msg[] = { '$',           // Sync
 			  0x01,          // MsgType
 			  0x00, 0x08,    // MsgLen
@@ -166,29 +171,50 @@ void main()
 			  0x00, 0xe3 };  // Checksum
   int i, packetLen;
 
+
+  //Assign message handler fcn to pointer
+  p_processMsg = &processMessage;
+
   //Read in test message
-  printf("Parsing test packet...\n");
   for(i = 0; i < 8; ++i)
     processChar(msg[i]);
+  if( msgReadSuccess == 0 ) return -1;
 
 
   //Create test packet & parse
-  printf("\n\nMaking new packet & parsing...\n");
-  packetLen = makePacket(1, "derpity", 8, G_outMsg);
+  packetLen = makePacket(1, "ko", 2, G_outMsg);
 
   for(i = 0; i < packetLen; ++i)
     processChar(G_outMsg[i]);
+  if( msgWriteSuccess == 0 ) return -2;
 
+  return 1; //Successful test
+}
+
+void main(void)
+{
+  int result;
+  unsigned char c;
+
+  printf("\nBeginning unit test for hermes.c message passing...\n");
+
+  result = hermes_unit();
+
+  if(result > 0)
+    printf("\nUnit test for hermes.c: --PASSED--\n");
+  else
+    printf("\nUnit test for hermes.c: --FAILED-- with error code %d\n", result);
+  
 
   // Begin reading in characters from the keyboard
   //----------------------------------------------
-  c = getchar();
+  /* c = getchar(); */
 
-  while (c != 'q')
-    {
-      processChar(c);
-      c = getchar();
-    }
+  /* while (c != 'q') */
+  /*   { */
+  /*     processChar(c); */
+  /*     c = getchar(); */
+  /*   } */
 
 
 }

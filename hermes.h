@@ -19,5 +19,10 @@
 unsigned char G_msg[MAX_MSGLEN];
 unsigned char G_outMsg[MAX_MSGLEN];
 
+
+// Function pointer-user points this pointer to the function to be
+// called whenever a message is finished being read in.
+void (*p_processMsg)(char* p_msg, unsigned int msgLen);
+
+
 void processChar(unsigned char c);
-void processMessage(char* p_msg, unsigned int msgLen);
