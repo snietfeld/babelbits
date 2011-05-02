@@ -8,10 +8,6 @@
  * Test configuration: See babelbits.c
  *--------------------------------------------------------------------*/
 
-#define SYNCBYTE '$'
-#define HEADERLEN 4
-#define CHECKLEN  2
-#define MAX_MSGLEN 256
 #define MAX_VARNAMELEN 30
 #define MAX_NUMTMVARS 64
 
@@ -39,9 +35,6 @@ typedef struct
 } TMVar;
 
 
-unsigned char G_msg[MAX_MSGLEN];
-unsigned char G_outMsg[MAX_MSGLEN];
 TMVar tmvars[MAX_NUMTMVARS];
 
-void processChar(unsigned char c);
 void processMessage(char* p_msg, unsigned int msgLen);
