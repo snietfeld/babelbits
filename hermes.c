@@ -2,6 +2,7 @@
  * Project Name: babelbits
  * File name:    hermes.c
  *
+ *
  * Description: Contains message parsing code
  *
  * Packet format:
@@ -15,6 +16,22 @@
  * Test configuration: uncomment "#define UNIT_TEST"
  *                     gcc -o hermes.exe hermes.c
  *                     run
+ *
+ *--------------------------------------------------------------------
+ *                  Copyright 2011, Scott Nietfeld
+ *
+ *  This program is free software: you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation, either version 3 of the License, or
+ *  (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *--------------------------------------------------------------------*/
 
 #define UNIT_TEST
@@ -26,31 +43,40 @@
 #include "hermes.h"
 
 
-unsigned char checksum8(unsigned char* p_msg, unsigned int len)
+//----------------Private Functions & Variables-----------------//
+
+unsigned char* p_inBuf;
+unsigned char* p_outBuf;
+
+int inBufLen, outBufLen;
+
+// Function pointer, user points this ptr to the function to be
+// called whenever a message is finished being read in.
+void (*p_msgHandler)(char* p_msg, unsigned int msgLen);
+
+
+unsigned char checksum8(unsigned char* p_msg, unsigned int len);
+unsigned short checksum16(unsigned char* p_msg, unsigned int len);
+
+//--------------------------------------------------------------//
+
+
+
+//----------------------Public Functions------------------------//
+void hermes_init(unsigned char* p_newInBuf,  int newInBufLen,
+		 unsigned char* p_newOutBuf, int newOutBufLen,
+		 void (*p_newMsgHandler)(char* p_msg, unsigned int msgLen))
 {
-  unsigned short accum = 0;
-  
-  while(len--) 
-    {
-      accum += *p_msg++;
-    }
-  return accum;
+  p_inBuf = p_newInBuf;
+  inBufLen = newInBufLen;
+
+  p_outBuf = p_newOutBuf;
+  outBufLen = newOutBufLen;
+
+  p_msgHandler = p_newMsgHandler;
 }
 
-unsigned short checksum16(unsigned char* p_msg, unsigned int len)
-{
-  unsigned short accum = 0;
-
-  while(len--)
-    {
-      accum += *p_msg++;
-    }
-  return accum;
-}
-
-
-
-void processChar(unsigned char c)
+void hermes_processChar(unsigned char c)
 {
   static unsigned char synced = 0;
   static unsigned char headerReceived = 0;
@@ -64,9 +90,21 @@ void processChar(unsigned char c)
   static unsigned short calcdChecksum;
 
 
+  if( count >= inBufLen )
+    {
+      //Message is too long, just scrap it & start over
+      synced         = 0;
+      headerReceived = 0;
+      count          = 0;
+      formatID       = 0;
+      packetLen      = 0;
+      return;
+    }
+
+
   if (synced)
     {
-      G_msg[count] = c;
+      p_inBuf[count] = c;
       ++count;
 
       if (headerReceived)
@@ -77,7 +115,7 @@ void processChar(unsigned char c)
 
 	      if( checkType == NOCHECK ) //If no error checking, just forward message
 		{
-		  p_msgHandler(&G_msg[HEADERLEN], packetLen-HEADERLEN-checkLen);
+		  p_msgHandler(&p_inBuf[HEADERLEN], packetLen-HEADERLEN-checkLen);
 		}
 
 	      else  //Need to do error checking
@@ -88,24 +126,24 @@ void processChar(unsigned char c)
 		    {
 		    case CHECKSUM8:
 		      {
-			rxdChecksum = G_msg[packetLen-1];
-			calcdChecksum = checksum8(&(G_msg[1]), packetLen-1-1);
+			rxdChecksum = p_inBuf[packetLen-1];
+			calcdChecksum = checksum8(&(p_inBuf[1]), packetLen-1-1);
 			break;
 		      }
 		    case CHECKSUM16:
 		      {
 			//printf("\nRunning CHECKSUM16...\n");
-			rxdChecksum = (G_msg[packetLen-2] << 8) | G_msg[packetLen-1];
-			calcdChecksum = checksum16(&(G_msg[1]), packetLen-2-1);
+			rxdChecksum = (p_inBuf[packetLen-2] << 8) | p_inBuf[packetLen-1];
+			calcdChecksum = checksum16(&(p_inBuf[1]), packetLen-2-1);
 			break;
 		      }
 		      
 		    default:     //Invalid check type, scrap packet & start over
-		      synced = 0;
+		      synced         = 0;
 		      headerReceived = 0;
-		      count = 0;
-		      formatID = 0;
-		      packetLen = 0;
+		      count          = 0;
+		      formatID       = 0;
+		      packetLen      = 0;
 		    }
 		  
 		  //printf("Received checksum: 0x%x \t Calc'd Checksum: 0x%x\n",
@@ -116,16 +154,16 @@ void processChar(unsigned char c)
 		      //printf("Message validated.\n");
 		      
 		      //Pass message to user
-		      p_msgHandler(&G_msg[HEADERLEN], packetLen-HEADERLEN-checkLen);
+		      p_msgHandler(&p_inBuf[HEADERLEN], packetLen-HEADERLEN-checkLen);
 		    }
 		}
 	      
 	      //Done with this message, reset variables for next one
-	      synced = 0;
+	      synced         = 0;
 	      headerReceived = 0;
-	      count = 0;
-	      formatID = 0;
-	      packetLen = 0;
+	      count          = 0;
+	      formatID       = 0;
+	      packetLen      = 0;
 	    }
 	}
     
@@ -133,8 +171,8 @@ void processChar(unsigned char c)
       else if (count == HEADERLEN)  //Time to read the header
 	{
 	  //printf("Processing header...\n");
-	  formatID = G_msg[1];   //Parse message type
-	  packetLen  = (G_msg[2] << 8) + G_msg[3];   //Parse message length
+	  formatID = p_inBuf[1];   //Parse message type
+	  packetLen  = (p_inBuf[2] << 8) + p_inBuf[3];   //Parse message length
 
 	  //Calculate checksum length based on checkType in formatId
 	  checkType = formatID >> 4 & 0x00ff;
@@ -148,7 +186,6 @@ void processChar(unsigned char c)
 	      break;
 
 	    case CHECKSUM8:
-	    case CRC8:
 	      checkLen = 1;
 	      break;
 
@@ -176,14 +213,14 @@ void processChar(unsigned char c)
     {
       //printf("Synced.\n");
       synced = 1;
-      G_msg[count] = c;
+      p_inBuf[count] = c;
       ++count;
     }
 }
 
 
 
-int makePacket(unsigned char checkType, unsigned char* p_data, 
+int hermes_makePacket(unsigned char checkType, unsigned char* p_data, 
 		unsigned int msgLen, unsigned char* p_outBuf)
 {
   int i;
@@ -202,7 +239,6 @@ int makePacket(unsigned char checkType, unsigned char* p_data,
       break;
 
     case CHECKSUM8:
-    case CRC8:
       packetLen = msgLen + HEADERLEN + 1;
       break;
 
@@ -215,7 +251,7 @@ int makePacket(unsigned char checkType, unsigned char* p_data,
     }
 
 
-  if( packetLen > MAX_MSGLEN ) return 0;
+  if( packetLen > outBufLen || packetLen > MAX_MSGLEN ) return 0;
 
   p_outBuf[0] = SYNCBYTE;
   p_outBuf[1] = formatID;
@@ -255,9 +291,40 @@ int makePacket(unsigned char checkType, unsigned char* p_data,
 
   return packetLen;
 }
+//---------------------------------------------------------------//
 
 
+
+//---------------------Error Checking Fcns-----------------------//
+
+unsigned char checksum8(unsigned char* p_msg, unsigned int len)
+{
+  unsigned short accum = 0;
+  
+  while(len--) 
+    {
+      accum += *p_msg++;
+    }
+  return accum;
+}
+
+unsigned short checksum16(unsigned char* p_msg, unsigned int len)
+{
+  unsigned short accum = 0;
+
+  while(len--)
+    {
+      accum += *p_msg++;
+    }
+  return accum;
+}
+//---------------------------------------------------------------//
+
+
+
+//-----------------------UNIT TEST CODE--------------------------//
 #ifdef UNIT_TEST
+
 int msgReadSuccess  = 0;
 int msgWriteSuccess = 0;
 
@@ -270,13 +337,18 @@ void processMessage(char* p_msg, unsigned int msgLen)
     printf("%c", p_msg[i]);
   printf("\"\n");
 
-  if( msgLen == 2 && p_msg[0] == 'o' && p_msg[1] == 'k') msgReadSuccess = 1;
+  if     ( msgLen == 2 && p_msg[0] == 'o' && p_msg[1] == 'k' ) msgReadSuccess = 1;
   else if( msgLen == 2 && p_msg[0] == 'k' && p_msg[1] == 'o' ) msgWriteSuccess = 1;
 }
 
+
 int hermes_unit(void)
 {
+  unsigned char inPacketBuf[256];    // Buffers for hermes to store incoming
+  unsigned char outPacketBuf[256];   // and outgoing packets
+
   int i, packetLen;
+
 
   //Test message
   unsigned char msg[] = { '$',              // Sync
@@ -286,22 +358,23 @@ int hermes_unit(void)
 			  0x01, 0x02 };     // Checksum
 
 
-  //Assign message handler fcn to pointer
-  p_msgHandler = &processMessage;
+  //Initialize hermes buffers and message handler
+  hermes_init( inPacketBuf, 256, outPacketBuf, 256, &processMessage);
 
 
   //Read in test message
   for(i = 0; i < 8; ++i)
-    processChar(msg[i]);
+    hermes_processChar(msg[i]);
   if( msgReadSuccess == 0 ) return -1;
 
 
   //Create test packet & parse
-  packetLen = makePacket(CHECKSUM8, "ko", 2, G_outMsg);
+  packetLen = hermes_makePacket(CHECKSUM8, "ko", 2, outPacketBuf);
 
   for(i = 0; i < packetLen; ++i)
-    processChar(G_outMsg[i]);
+    hermes_processChar(outPacketBuf[i]);
   if( msgWriteSuccess == 0 ) return -2;
+
 
   return 1; //Successful test
 }
@@ -331,7 +404,7 @@ void main(void)
   /*     c = getchar(); */
   /*   } */
 
-
 }
 
 #endif
+//------------------------End Unit Test Code--------------------//
