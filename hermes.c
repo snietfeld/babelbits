@@ -38,6 +38,7 @@
 
 #ifdef UNIT_TEST
 #include <stdio.h>
+#include <stdint.h>
 #endif
 
 #include "hermes.h"
@@ -45,27 +46,27 @@
 
 //----------------Private Functions & Variables-----------------//
 
-unsigned char* p_inBuf;
-unsigned char* p_outBuf;
+uint8_t* p_inBuf;
+uint8_t* p_outBuf;
 
 int inBufLen, outBufLen;
 
 // Function pointer, user points this ptr to the function to be
 // called whenever a message is finished being read in.
-void (*p_msgHandler)(char* p_msg, unsigned int msgLen);
+void (*p_msgHandler)(uint8_t* p_msg, uint16_t msgLen);
 
 
-unsigned char checksum8(unsigned char* p_msg, unsigned int len);
-unsigned short checksum16(unsigned char* p_msg, unsigned int len);
+uint8_t checksum8(uint8_t* p_msg, uint16_t len);
+uint16_t checksum16(uint8_t* p_msg, uint16_t len);
 
 //--------------------------------------------------------------//
 
 
 
 //----------------------Public Functions------------------------//
-void hermes_init(unsigned char* p_newInBuf,  int newInBufLen,
-		 unsigned char* p_newOutBuf, int newOutBufLen,
-		 void (*p_newMsgHandler)(char* p_msg, unsigned int msgLen))
+void hermes_init(uint8_t* p_newInBuf,  uint16_t newInBufLen,
+		 uint8_t* p_newOutBuf, uint16_t newOutBufLen,
+		 void (*p_newMsgHandler)(uint8_t* p_msg, uint16_t msgLen))
 {
   p_inBuf = p_newInBuf;
   inBufLen = newInBufLen;
@@ -76,18 +77,18 @@ void hermes_init(unsigned char* p_newInBuf,  int newInBufLen,
   p_msgHandler = p_newMsgHandler;
 }
 
-void hermes_processChar(unsigned char c)
+void hermes_processChar(uint8_t c)
 {
-  static unsigned char synced = 0;
-  static unsigned char headerReceived = 0;
+  static uint8_t synced = 0;
+  static uint8_t headerReceived = 0;
 
-  static unsigned short packetLen = 0;
-  static unsigned short formatID = 0;
-  static unsigned short checkType;
-  static unsigned short checkLen;
-  static unsigned int   count = 0;
-  static unsigned short rxdChecksum;
-  static unsigned short calcdChecksum;
+  static uint16_t packetLen = 0;
+  static uint16_t formatID = 0;
+  static uint16_t checkType;
+  static uint16_t checkLen;
+  static uint16_t count = 0;
+  static uint16_t rxdChecksum;
+  static uint16_t calcdChecksum;
 
 
   if( count >= inBufLen )
@@ -220,13 +221,13 @@ void hermes_processChar(unsigned char c)
 
 
 
-int hermes_makePacket(unsigned char checkType, unsigned char* p_data, 
-		unsigned int msgLen, unsigned char* p_outBuf)
+int hermes_makePacket(uint8_t checkType, uint8_t* p_data, 
+		      uint16_t msgLen,   uint8_t* p_outBuf)
 {
-  int i;
-  unsigned int packetLen;
-  unsigned int formatID;
-  unsigned short calcdChecksum;
+  uint16_t i;
+  uint16_t packetLen;
+  uint16_t formatID;
+  uint16_t calcdChecksum;
 
   //Calculate packet length, switch on check type since it affects this
   formatID = checkType << 4;
@@ -297,9 +298,9 @@ int hermes_makePacket(unsigned char checkType, unsigned char* p_data,
 
 //---------------------Error Checking Fcns-----------------------//
 
-unsigned char checksum8(unsigned char* p_msg, unsigned int len)
+uint8_t checksum8(uint8_t* p_msg, uint16_t len)
 {
-  unsigned short accum = 0;
+  uint16_t accum = 0;
   
   while(len--) 
     {
@@ -308,9 +309,9 @@ unsigned char checksum8(unsigned char* p_msg, unsigned int len)
   return accum;
 }
 
-unsigned short checksum16(unsigned char* p_msg, unsigned int len)
+uint16_t checksum16(uint8_t* p_msg, uint16_t len)
 {
-  unsigned short accum = 0;
+  uint16_t accum = 0;
 
   while(len--)
     {
@@ -328,9 +329,9 @@ unsigned short checksum16(unsigned char* p_msg, unsigned int len)
 int msgReadSuccess  = 0;
 int msgWriteSuccess = 0;
 
-void processMessage(char* p_msg, unsigned int msgLen)
+void processMessage(uint8_t* p_msg, uint16_t msgLen)
 {
-  int i;
+  uint16_t i;
 
   printf("Message received: \"");
   for (i = 0; i < msgLen; ++i)
@@ -344,14 +345,14 @@ void processMessage(char* p_msg, unsigned int msgLen)
 
 int hermes_unit(void)
 {
-  unsigned char inPacketBuf[256];    // Buffers for hermes to store incoming
-  unsigned char outPacketBuf[256];   // and outgoing packets
+  uint8_t inPacketBuf[256];    // Buffers for hermes to store incoming
+  uint8_t outPacketBuf[256];   // and outgoing packets
 
-  int i, packetLen;
+  uint16_t i, packetLen;
 
 
   //Test message
-  unsigned char msg[] = { '$',              // Sync
+  uint8_t msg[] = { '$',              // Sync
 			  CHECKSUM16 << 4,  // CheckType
 			  0x00, 0x08,       // MsgLen
 			  'o', 'k',         // Data
@@ -381,8 +382,8 @@ int hermes_unit(void)
 
 void main(void)
 {
-  int result;
-  unsigned char c;
+  uint16_t result;
+  uint8_t c;
 
   printf("\nBeginning unit test for hermes.c message passing...\n");
 

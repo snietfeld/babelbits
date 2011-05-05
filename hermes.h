@@ -23,6 +23,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *--------------------------------------------------------------------*/
+#include <stdint.h>
 
 #define SYNCBYTE '$'
 #define HEADERLEN 4
@@ -40,13 +41,13 @@ enum
   };
 
 
-void hermes_init(unsigned char* p_newInBuf,  int newInBufLen,
-		 unsigned char* p_newOutBuf, int newOutBufLen,
-		 void (*p_msgHandler)(char* p_msg, unsigned int msgLen));
+void hermes_init(uint8_t* p_newInBuf,  uint16_t newInBufLen,
+		 uint8_t* p_newOutBuf, uint16_t newOutBufLen,
+		 void (*p_msgHandler)(uint8_t* p_msg, uint16_t msgLen));
 		 
-void hermes_processChar(unsigned char c);
+void hermes_processChar(uint8_t c);
 
-int hermes_makePacket(unsigned char  checkType, 
-		      unsigned char* p_data, 
-		      unsigned int   msgLen, 
-		      unsigned char* p_outBuf);
+int hermes_makePacket(uint8_t  checkType, 
+		      uint8_t* p_data, 
+		      uint16_t msgLen, 
+		      uint8_t* p_outBuf);
