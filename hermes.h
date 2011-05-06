@@ -25,10 +25,10 @@
  *--------------------------------------------------------------------*/
 #include <stdint.h>
 
-#define SYNCBYTE '$'
-#define HEADERLEN 4
-#define CHECKLEN  2
-#define MAX_MSGLEN 0xffff
+#define SYNC_1 'T'
+#define SYNC_2 'M'
+#define HEADERLEN 5
+#define MAX_MSGLEN (0xffff - HEADERLEN - 4)
 
 
 enum
@@ -51,3 +51,5 @@ int hermes_makePacket(uint8_t  checkType,
 		      uint8_t* p_data, 
 		      uint16_t msgLen, 
 		      uint8_t* p_outBuf);
+
+uint8_t hermes_unit(void);

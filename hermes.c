@@ -91,19 +91,7 @@ void hermes_processChar(uint8_t c)
   static uint16_t calcdChecksum;
 
 
-  if( count >= inBufLen )
-    {
-      //Message is too long, just scrap it & start over
-      synced         = 0;
-      headerReceived = 0;
-      count          = 0;
-      formatID       = 0;
-      packetLen      = 0;
-      return;
-    }
-
-
-  if (synced)
+  if (synced == 2)
     {
       p_inBuf[count] = c;
       ++count;
@@ -128,14 +116,14 @@ void hermes_processChar(uint8_t c)
 		    case CHECKSUM8:
 		      {
 			rxdChecksum = p_inBuf[packetLen-1];
-			calcdChecksum = checksum8(&(p_inBuf[1]), packetLen-1-1);
+			calcdChecksum = checksum8(&(p_inBuf[2]), packetLen-2-1);
 			break;
 		      }
 		    case CHECKSUM16:
 		      {
 			//printf("\nRunning CHECKSUM16...\n");
 			rxdChecksum = (p_inBuf[packetLen-2] << 8) | p_inBuf[packetLen-1];
-			calcdChecksum = checksum16(&(p_inBuf[1]), packetLen-2-1);
+			calcdChecksum = checksum16(&(p_inBuf[2]), packetLen-3-1);
 			break;
 		      }
 		      
@@ -172,8 +160,21 @@ void hermes_processChar(uint8_t c)
       else if (count == HEADERLEN)  //Time to read the header
 	{
 	  //printf("Processing header...\n");
-	  formatID = p_inBuf[1];   //Parse message type
-	  packetLen  = (p_inBuf[2] << 8) + p_inBuf[3];   //Parse message length
+	  formatID = p_inBuf[2];   //Parse message type
+	  packetLen  = (p_inBuf[3] << 8) + p_inBuf[4];   //Parse message length
+
+
+	  if( packetLen >= inBufLen || packetLen > MAX_MSGLEN )
+	    {
+	      //Message is too long, just scrap it & start over
+	      //printf("\nOversized packet. Scrapping");
+	      synced         = 0;
+	      headerReceived = 0;
+	      count          = 0;
+	      formatID       = 0;
+	      packetLen      = 0;
+	      return;
+	    }
 
 	  //Calculate checksum length based on checkType in formatId
 	  checkType = formatID >> 4 & 0x00ff;
@@ -203,17 +204,24 @@ void hermes_processChar(uint8_t c)
 	      formatID = 0;
 	      packetLen = 0;
 	    }
-	  //printf("formatID: %d \t packetLen: %d \t checkLen: %d\n", 
-	  //	 formatID, packetLen, checkLen);
+	  //printf("formatID: %d \t packetLen: %x \t checkLen: %d\n", 
+	  //formatID, packetLen, checkLen);
 
 	  headerReceived = 1;
 	}
     }
 
-  else if (c == SYNCBYTE)   //Check for syncbyte to start message
+  else if( c == SYNC_1 )   //Check for syncbyte to start message
     {
-      //printf("Synced.\n");
+      //printf("Sync 1\n");
       synced = 1;
+      p_inBuf[count] = c;
+      ++count;
+    }
+  else if( synced == 1 & c == SYNC_2 )
+    {
+      //printf("Sync 2\n");
+      synced = 2;
       p_inBuf[count] = c;
       ++count;
     }
@@ -254,10 +262,12 @@ int hermes_makePacket(uint8_t checkType, uint8_t* p_data,
 
   if( packetLen > outBufLen || packetLen > MAX_MSGLEN ) return 0;
 
-  p_outBuf[0] = SYNCBYTE;
-  p_outBuf[1] = formatID;
-  p_outBuf[2] = (packetLen >> 8) & 0x00ff;
-  p_outBuf[3] = packetLen & 0x00ff;
+  p_outBuf[0] = SYNC_1;
+  p_outBuf[1] = SYNC_2;
+  p_outBuf[2] = formatID;
+  p_outBuf[3] = (packetLen >> 8) & 0x00ff;
+  p_outBuf[4] = packetLen & 0x00ff;
+
 
   //Add message to packet
   for(i = 0; i < msgLen; ++i)
@@ -270,7 +280,7 @@ int hermes_makePacket(uint8_t checkType, uint8_t* p_data,
     {
     case CHECKSUM16:
       {
-	calcdChecksum = checksum16(&(p_outBuf[1]), packetLen - 2 - 1);
+	calcdChecksum = checksum16(&(p_outBuf[2]), packetLen - 3 - 1);
 	p_outBuf[HEADERLEN + msgLen]     = (calcdChecksum >> 8) & 0x00ff;
 	p_outBuf[HEADERLEN + msgLen + 1] = calcdChecksum & 0x00ff;
 	break;
@@ -278,7 +288,7 @@ int hermes_makePacket(uint8_t checkType, uint8_t* p_data,
 
     case CHECKSUM8:
       {
-	calcdChecksum = checksum8(&(p_outBuf[1]), packetLen - 1 - 1);
+	calcdChecksum = checksum8(&(p_outBuf[2]), packetLen - 2 - 1);
 	p_outBuf[HEADERLEN + msgLen] = calcdChecksum;
 	break;
       }
@@ -326,47 +336,70 @@ uint16_t checksum16(uint8_t* p_msg, uint16_t len)
 //-----------------------UNIT TEST CODE--------------------------//
 #ifdef UNIT_TEST
 
-int msgReadSuccess  = 0;
-int msgWriteSuccess = 0;
+#include <stdlib.h>  //need rand()
+
+uint8_t msgBuf[1024];
+
+uint8_t msgReadSuccess  = 0;
+uint8_t msgWriteSuccess = 0;
+uint8_t randIOSuccess = 1;
 
 void processMessage(uint8_t* p_msg, uint16_t msgLen)
 {
-  uint16_t i;
+  uint16_t i, j;
 
-  printf("Message received: \"");
-  for (i = 0; i < msgLen; ++i)
-    printf("%c", p_msg[i]);
-  printf("\"\n");
+  /* printf("Message received: \""); */
+  /* for (i = 0; i < msgLen; ++i) */
+  /*   printf("%c", p_msg[i]); */
+  /* printf("\"\n"); */
 
   if     ( msgLen == 2 && p_msg[0] == 'o' && p_msg[1] == 'k' ) msgReadSuccess = 1;
   else if( msgLen == 2 && p_msg[0] == 'k' && p_msg[1] == 'o' ) msgWriteSuccess = 1;
+  else
+    {
+      //Verify that inputted and outputted messages match
+      for(i = 0; i < msgLen; i++)
+	{
+	  if( p_msg[i] != msgBuf[i] ) 
+	  {
+	    printf("\nMessage IO FAILED: %c != %c, char %d \t msgLen: %d\n", 
+		   p_msg[i], msgBuf[i], i, msgLen);
+	    randIOSuccess = 0;
+	    return;
+	  }
+	}
+      //printf("\nRandom %4d-byte message: PASSED", msgLen);
+    }
 }
 
 
-int hermes_unit(void)
+uint8_t hermes_unit(void)
 {
-  uint8_t inPacketBuf[256];    // Buffers for hermes to store incoming
-  uint8_t outPacketBuf[256];   // and outgoing packets
 
-  uint16_t i, packetLen;
+  uint8_t inPacketBuf[1024];    // Buffers for hermes to store incoming
+  uint8_t outPacketBuf[1024];   // and outgoing packets
+
+  uint16_t i, j, msgLen, packetLen;
+  uint8_t result = 0x00;
 
 
   //Test message
-  uint8_t msg[] = { '$',              // Sync
-			  CHECKSUM16 << 4,  // CheckType
-			  0x00, 0x08,       // MsgLen
-			  'o', 'k',         // Data
-			  0x01, 0x02 };     // Checksum
+  uint8_t msg[] = { SYNC_1,           // Sync
+		    SYNC_2,
+		    CHECKSUM16 << 4,  // CheckType
+		    0x00, 0x09,       // MsgLen
+		    'o', 'k',         // Data
+		    0x01, 0x03 };     // Checksum
 
 
   //Initialize hermes buffers and message handler
-  hermes_init( inPacketBuf, 256, outPacketBuf, 256, &processMessage);
+  hermes_init( inPacketBuf, 1024, outPacketBuf, 1024, &processMessage);
 
 
   //Read in test message
-  for(i = 0; i < 8; ++i)
+  for(i = 0; i < 9; ++i)
     hermes_processChar(msg[i]);
-  if( msgReadSuccess == 0 ) return -1;
+  if( msgReadSuccess == 0 ) result |= 0x01;
 
 
   //Create test packet & parse
@@ -374,10 +407,33 @@ int hermes_unit(void)
 
   for(i = 0; i < packetLen; ++i)
     hermes_processChar(outPacketBuf[i]);
-  if( msgWriteSuccess == 0 ) return -2;
+  if( msgWriteSuccess == 0 ) result |= 0x02;
 
 
-  return 1; //Successful test
+  //Generate random packets & parse
+  for(i = 0; i < 10000; i++)
+    {
+      //First, feed random number of random noise bytes in
+      if( rand() % 101 < 99 ) hermes_processChar(rand() % 256);
+
+      //Choose random length and fill packet w/ random data
+      msgLen = rand() % 1024;
+
+      for(j = 0; j < msgLen; j++)
+	msgBuf[j] = rand() % 256;
+
+      //Make it into a packet
+      packetLen = hermes_makePacket(CHECKSUM16, msgBuf, msgLen, outPacketBuf);
+
+      //Parse it!
+      for(j = 0; j < packetLen; j++)
+	hermes_processChar(outPacketBuf[j]);
+
+      //Verify that inputted message and outputted message match
+      if( randIOSuccess == 0 ) result |= 0x04;
+    }
+
+  return result; //Successful test
 }
 
 void main(void)
@@ -389,10 +445,24 @@ void main(void)
 
   result = hermes_unit();
 
-  if(result > 0)
-    printf("\nUnit test for hermes.c: --PASSED--\n");
+  printf("\n------------------------------------------------------\n"
+	 "Hermes unit test returned with code: 0x%2x\n", result & 4);
+
+  if( result & 0x01 )
+    printf("\nPredefined packet parsing:\t\t --FAILED--");
   else
-    printf("\nUnit test for hermes.c: --FAILED-- with error code %d\n", result);
+    printf("\nPredefined packet parsing:\t\t --PASSED--");
+
+  if( result & 0x02 )
+    printf("\nPredefined packet stuffing & parsing:\t --FAILED--");
+  else
+    printf("\nPredefined packet stuffing & parsing:\t --PASSED--");
+
+  if( result & 0x04 )
+    printf("\nRandom packet stuffing & parsing:\t --FAILED--");
+  else
+    printf("\nRandom packet stuffing & parsing:\t --PASSED--");
+
   
 
   // Begin reading in characters from the keyboard
