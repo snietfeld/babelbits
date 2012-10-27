@@ -27,8 +27,11 @@
 
 #define SYNC_1 'T'
 #define SYNC_2 'M'
-#define HEADERLEN 5
-#define MAX_MSGLEN (0xffff - HEADERLEN - 4)
+#define HEADERLEN 5  //Includes sync bytes(2), formatID(1), msgLen(2)
+#define MAX_MSGLEN (0xffff - HEADERLEN - 4)  //The 4 is max checksum len (CRC32)
+#define MIN_MSGLEN (0)
+#define MAX_PACKETLEN (MAX_MSGLEN + HEADERLEN + 4) //The 4 is max checksum len (CRC32)
+#define MIN_PACKETLEN (HEADERLEN)
 
 
 enum

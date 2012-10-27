@@ -164,7 +164,8 @@ void hermes_processChar(uint8_t c)
 	  packetLen  = (p_inBuf[3] << 8) + p_inBuf[4];   //Parse message length
 
 
-	  if( packetLen >= inBufLen || packetLen > MAX_MSGLEN )
+	  //Do some basic checks to see if header is sane
+	  if (packetLen >= inBufLen || packetLen > MAX_PACKETLEN || packetLen < MIN_PACKETLEN)
 	    {
 	      //Message is too long, just scrap it & start over
 	      //printf("\nOversized packet. Scrapping");
@@ -203,12 +204,23 @@ void hermes_processChar(uint8_t c)
 	      count = 0;
 	      formatID = 0;
 	      packetLen = 0;
+	      return;
 	    }
 	  //printf("formatID: %d \t packetLen: %x \t checkLen: %d\n", 
 	  //formatID, packetLen, checkLen);
 
 	  headerReceived = 1;
 	}
+      
+      else //count > HEADERLEN, but header not received--something's gone wrong
+	{
+	  synced         = 0;
+	  headerReceived = 0;
+	  count          = 0;
+	  formatID       = 0;
+	  packetLen      = 0;
+	  return;
+	  }
     }
 
   else if( c == SYNC_1 )   //Check for syncbyte to start message
@@ -218,12 +230,23 @@ void hermes_processChar(uint8_t c)
       p_inBuf[count] = c;
       ++count;
     }
-  else if( synced == 1 & c == SYNC_2 )
+  else if( synced == 1)
     {
-      //printf("Sync 2\n");
-      synced = 2;
-      p_inBuf[count] = c;
-      ++count;
+      if( c = SYNC_2 ) //Found second sync byte
+	{
+	  //printf("Sync 2\n");
+	  synced = 2;
+	  p_inBuf[count] = c;
+	  ++count;
+	}
+      else{  //False start, reset
+	synced         = 0;
+	headerReceived = 0;
+	count          = 0;
+	formatID       = 0;
+	packetLen      = 0;
+	return;
+      }
     }
 }
 
@@ -340,8 +363,8 @@ uint16_t checksum16(uint8_t* p_msg, uint16_t len)
 
 uint8_t msgBuf[1024];
 
-uint8_t msgReadSuccess  = 0;
-uint8_t msgWriteSuccess = 0;
+uint8_t msgReadSuccess  = 1;
+uint8_t msgWriteSuccess = 1;
 uint8_t randIOSuccess = 1;
 
 void processMessage(uint8_t* p_msg, uint16_t msgLen)
@@ -393,7 +416,9 @@ uint8_t hermes_unit(void)
 
 
   //Initialize hermes buffers and message handler
+  printf("hermes_init()...");
   hermes_init( inPacketBuf, 1024, outPacketBuf, 1024, &processMessage);
+  printf("done\n");
 
 
   //Read in test message
@@ -410,6 +435,20 @@ uint8_t hermes_unit(void)
   if( msgWriteSuccess == 0 ) result |= 0x02;
 
 
+  //Test max length packet
+  msgLen = 1017;
+  for(j = 0; j < msgLen; j++){
+    msgBuf[j] = rand() % 256;
+  }
+  //Make it into a packet
+  packetLen = hermes_makePacket(CHECKSUM16, msgBuf, msgLen, outPacketBuf);
+  //printf("\t packetLen: %d\n", packetLen);
+  //Parse it!
+  for(j = 0; j < packetLen; j++){
+    hermes_processChar(outPacketBuf[j]);
+  }
+
+
   //Generate random packets & parse
   for(i = 0; i < 10000; i++)
     {
@@ -417,17 +456,21 @@ uint8_t hermes_unit(void)
       if( rand() % 101 < 99 ) hermes_processChar(rand() % 256);
 
       //Choose random length and fill packet w/ random data
-      msgLen = rand() % 1024;
+      msgLen = rand() % (1024 - HEADERLEN);  //Careful not to make msg bigger than buf
+      //printf("msgLen: %d", msgLen);
 
-      for(j = 0; j < msgLen; j++)
+      for(j = 0; j < msgLen; j++){
 	msgBuf[j] = rand() % 256;
+      }
 
       //Make it into a packet
       packetLen = hermes_makePacket(CHECKSUM16, msgBuf, msgLen, outPacketBuf);
+      //printf("\t packetLen: %d\n", packetLen);
 
       //Parse it!
-      for(j = 0; j < packetLen; j++)
-	hermes_processChar(outPacketBuf[j]);
+      for(j = 0; j < packetLen; j++){
+	  hermes_processChar(outPacketBuf[j]);
+      }
 
       //Verify that inputted message and outputted message match
       if( randIOSuccess == 0 ) result |= 0x04;
