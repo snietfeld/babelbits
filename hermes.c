@@ -42,6 +42,8 @@
 #endif
 
 #include "hermes.h"
+#include "crc16.h"
+//#include "crc32.h"
 
 
 //----------------Private Functions & Variables-----------------//
@@ -87,14 +89,18 @@ void hermes_processChar(uint8_t c)
   static uint16_t checkType;
   static uint16_t checkLen;
   static uint16_t count = 0;
-  static uint16_t rxdChecksum;
-  static uint16_t calcdChecksum;
+  static uint32_t rxdChecksum;
+  static uint32_t calcdChecksum;   //Only used if using checksums
+  static crc16_t rxd_crc16;
+  static crc16_t calcd_crc16;      //Only used if using CRC16 checking
+  static uint8_t good_check;       //Boolean to tell if checksum/crc is good
 
 
   if (synced == 2)
     {
       p_inBuf[count] = c;
       ++count;
+      //printf("count: %d\n", count);
 
       if (headerReceived)
 	{
@@ -114,20 +120,35 @@ void hermes_processChar(uint8_t c)
 		  switch( checkType )  //First nibble is check type
 		    {
 		    case CHECKSUM8:
-		      {
-			rxdChecksum = p_inBuf[packetLen-1];
-			calcdChecksum = checksum8(&(p_inBuf[2]), packetLen-2-1);
-			break;
-		      }
+		      rxdChecksum = p_inBuf[packetLen-1];
+		      calcdChecksum = checksum8(&(p_inBuf[2]), packetLen-2-1);
+
+		      good_check = (rxdChecksum == calcdChecksum) ? 1 : 0;
+		      break;
+		      
 		    case CHECKSUM16:
-		      {
-			//printf("\nRunning CHECKSUM16...\n");
-			rxdChecksum = (p_inBuf[packetLen-2] << 8) | p_inBuf[packetLen-1];
-			calcdChecksum = checksum16(&(p_inBuf[2]), packetLen-3-1);
-			break;
-		      }
+		      //printf("\nRunning CHECKSUM16...\n");
+		      rxdChecksum = (p_inBuf[packetLen-2] << 8) | p_inBuf[packetLen-1];
+		      calcdChecksum = checksum16(&(p_inBuf[2]), packetLen-3-1);
+		      /*printf("Received checksum: 0x%x \t Calc'd Checksum: 0x%x\n",
+			rxdChecksum, calcdChecksum);*/
+
+		      good_check = (rxdChecksum == calcdChecksum) ? 1 : 0;
+		      break;
+
+		    case CRC16:
+		      rxd_crc16 = (p_inBuf[packetLen-2] << 8) | (p_inBuf[packetLen-1]);
+		      calcd_crc16 = crc16_init();
+		      calcd_crc16 = crc16_update(calcd_crc16, &(p_inBuf[2]), packetLen-3-1);
+		      calcd_crc16 = crc16_finalize(calcd_crc16);
+		      /*printf("Received CRC16: 0x%x \t Calc'd CRC16: 0x%x\n", 
+			rxd_crc16, calcd_crc16);*/
+		      
+		      good_check = (rxd_crc16 == calcd_crc16) ? 1 : 0;
+		      break;
 		      
 		    default:     //Invalid check type, scrap packet & start over
+		      good_check = 0;
 		      synced         = 0;
 		      headerReceived = 0;
 		      count          = 0;
@@ -135,10 +156,7 @@ void hermes_processChar(uint8_t c)
 		      packetLen      = 0;
 		    }
 		  
-		  //printf("Received checksum: 0x%x \t Calc'd Checksum: 0x%x\n",
-		  //rxdChecksum, calcdChecksum);
-		  
-		  if( calcdChecksum == rxdChecksum)
+		  if( good_check == 1 )
 		    {
 		      //printf("Message validated.\n");
 		      
@@ -156,7 +174,6 @@ void hermes_processChar(uint8_t c)
 	    }
 	}
     
-
       else if (count == HEADERLEN)  //Time to read the header
 	{
 	  //printf("Processing header...\n");
@@ -198,7 +215,7 @@ void hermes_processChar(uint8_t c)
 
 	    //Invalid check type--scrap packet and start over
 	    default: 
-	      //printf("\nInvalid check type: 0x%x\n", checkType);
+	      printf("\nInvalid check type: 0x%x\n", checkType);
 	      synced = 0;
 	      headerReceived = 0;
 	      count = 0;
@@ -206,13 +223,13 @@ void hermes_processChar(uint8_t c)
 	      packetLen = 0;
 	      return;
 	    }
-	  //printf("formatID: %d \t packetLen: %x \t checkLen: %d\n", 
-	  //formatID, packetLen, checkLen);
+	  /*printf("formatID: %d \t packetLen: %x \t checkLen: %d\n", 
+	    formatID, packetLen, checkLen); */
 
 	  headerReceived = 1;
 	}
       
-      else //count > HEADERLEN, but header not received--something's gone wrong
+      else if (count > HEADERLEN)  //count > HEADERLEN, but header not received--something's gone wrong
 	{
 	  synced         = 0;
 	  headerReceived = 0;
@@ -223,16 +240,16 @@ void hermes_processChar(uint8_t c)
 	  }
     }
 
-  else if( c == SYNC_1 )   //Check for syncbyte to start message
+  else if( c == SYNC_1 )   //Check for SYNC_1 byte to start message
     {
       //printf("Sync 1\n");
       synced = 1;
       p_inBuf[count] = c;
       ++count;
     }
-  else if( synced == 1)
+  else if( synced == 1)    //Check next byte for SYNC_2 byte
     {
-      if( c = SYNC_2 ) //Found second sync byte
+      if( c == SYNC_2 )     //Found second sync byte
 	{
 	  //printf("Sync 2\n");
 	  synced = 2;
@@ -259,6 +276,7 @@ int hermes_makePacket(uint8_t checkType, uint8_t* p_data,
   uint16_t packetLen;
   uint16_t formatID;
   uint16_t calcdChecksum;
+  crc16_t calcd_crc16;
 
   //Calculate packet length, switch on check type since it affects this
   formatID = checkType << 4;
@@ -301,6 +319,17 @@ int hermes_makePacket(uint8_t checkType, uint8_t* p_data,
   //Add checksum (if needed)
   switch( checkType )  //First nibble is check type
     {
+    case CRC16:
+      {
+	calcd_crc16 = crc16_init();
+	calcd_crc16 = crc16_update(calcd_crc16, &(p_outBuf[2]), packetLen-3-1);
+	calcd_crc16 = crc16_finalize(calcd_crc16);
+
+	p_outBuf[HEADERLEN + msgLen]     = (calcd_crc16 >> 8) & 0x00ff;
+	p_outBuf[HEADERLEN + msgLen + 1] = calcd_crc16 & 0x00ff;
+	break;
+      }
+
     case CHECKSUM16:
       {
 	calcdChecksum = checksum16(&(p_outBuf[2]), packetLen - 3 - 1);
@@ -391,7 +420,7 @@ void processMessage(uint8_t* p_msg, uint16_t msgLen)
 	    return;
 	  }
 	}
-      //printf("\nRandom %4d-byte message: PASSED", msgLen);
+      printf("\nRandom %4d-byte message: PASSED", msgLen);
     }
 }
 
@@ -428,7 +457,7 @@ uint8_t hermes_unit(void)
 
 
   //Create test packet & parse
-  packetLen = hermes_makePacket(CHECKSUM8, "ko", 2, outPacketBuf);
+  packetLen = hermes_makePacket(CRC16, "ko", 2, outPacketBuf);
 
   for(i = 0; i < packetLen; ++i)
     hermes_processChar(outPacketBuf[i]);
@@ -441,7 +470,7 @@ uint8_t hermes_unit(void)
     msgBuf[j] = rand() % 256;
   }
   //Make it into a packet
-  packetLen = hermes_makePacket(CHECKSUM16, msgBuf, msgLen, outPacketBuf);
+  packetLen = hermes_makePacket(CRC16, msgBuf, msgLen, outPacketBuf);
   //printf("\t packetLen: %d\n", packetLen);
   //Parse it!
   for(j = 0; j < packetLen; j++){
@@ -464,7 +493,7 @@ uint8_t hermes_unit(void)
       }
 
       //Make it into a packet
-      packetLen = hermes_makePacket(CHECKSUM16, msgBuf, msgLen, outPacketBuf);
+      packetLen = hermes_makePacket(CRC16, msgBuf, msgLen, outPacketBuf);
       //printf("\t packetLen: %d\n", packetLen);
 
       //Parse it!
